@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>나혼자만 라이벌즈</title>
+    <title>마크 좀비 디펜스 RPG & 도형 학습</title>
     <style>
         body {
             margin: 0;
@@ -47,6 +47,13 @@
         p { font-size: 18px; color: #e0e0e0; line-height: 1.8; margin-bottom: 10px; }
         .highlight { color: #00ffea; font-weight: bold; }
         .alert { color: #ff5555; font-weight: bold; }
+
+        .skip-btn {
+            padding: 10px 20px; font-size: 18px; font-weight: bold; background-color: #2a2a40; color: white;
+            border: 2px solid #00d2ff; border-radius: 8px; cursor: pointer; transition: 0.2s;
+            pointer-events: auto; touch-action: manipulation;
+        }
+        .skip-btn:hover { background-color: #00d2ff; color: #000; box-shadow: 0 0 15px #00d2ff;}
 
         #hud {
             position: absolute; top: max(20px, env(safe-area-inset-top)); left: max(20px, env(safe-area-inset-left)); z-index: 10;
@@ -309,17 +316,18 @@
                 [사격]: <b>화면 터치 시 자동 사격</b><br>
                 [무기변경]: <b>우측 상단 아이콘 터치</b>
             </p>
-            <p style="margin-top: 30px; font-size: 26px; font-weight: bold; color: #00ffea; animation: pulse 1.5s infinite;">클릭하여 시작</p>
+            
+            <p id="start-text" style="margin-top: 30px; font-size: 26px; font-weight: bold; color: #00ffea; animation: pulse 1.5s infinite; cursor: pointer;">클릭하여 기본 시작 (LV.1)</p>
         </div>
     </div>
 
     <div id="game-over">
-        <div class="menu-box" onclick="restartGame()">
+        <div class="menu-box" onclick="returnToMenu()">
             <h1>GAME OVER</h1>
             <p>당신은 감염되었습니다...</p>
             <p>최종 레벨: <span id="final-level" style="color:#00ffaa; font-weight: bold;">1</span></p>
             <p>최종 점수: <span id="final-score" style="color:#ffd700; font-size: 32px; font-weight: bold;">0</span></p>
-            <p style="margin-top: 30px; font-size: 22px; font-weight: bold; color: #fff;">클릭하여 재시작</p>
+            <p style="margin-top: 30px; font-size: 22px; font-weight: bold; color: #fff;">클릭하여 메뉴로</p>
         </div>
     </div>
 
@@ -459,6 +467,7 @@
                 if(gameStarted && !isDead && !gamePaused) { cycleWeapon(1); }
             });
 
+            // Prevent noisy Pointer Lock unhandledrejections overall
             window.addEventListener('unhandledrejection', (event) => {
                 if (event.reason && (event.reason.name === 'SecurityError' || (event.reason.message && event.reason.message.includes('Pointer lock')))) {
                     event.preventDefault(); 
@@ -469,9 +478,6 @@
 
             createWorld();
             createWeapon();
-            
-            spawnShapes(5);
-            for(let i=0; i<8; i++) spawnEnemy();
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setPixelRatio(window.devicePixelRatio);
@@ -494,11 +500,28 @@
                 document.getElementById('pc-hint').style.display = 'none';
             }
 
-            instructions.addEventListener('click', startGame);
+            // 바탕이나 텍스트를 누르면 기본 1레벨 시작 또는 일시정지 해제
+            instructions.addEventListener('click', (e) => {
+                if(e.target.tagName !== 'BUTTON') {
+                    if (document.getElementById('start-text').innerText === "클릭하여 재개") {
+                        startGame();
+                    } else {
+                        startWithLevel(1, e);
+                    }
+                }
+            });
 
             controls.addEventListener('lock', () => { if(!isDead && !gamePaused) { blocker.style.display = 'none'; gameStarted = true; }});
+            
+            // ESC 등으로 마우스 잠금이 풀렸을 때 일시정지 화면 띄우기 (패널이 띄워진 상태가 아닐 때만)
             controls.addEventListener('unlock', () => { 
-                if(!isDead && !gamePaused) { blocker.style.display = 'flex'; gameStarted = false; hideQuestionPanel(); isShooting = false;}
+                if(!isDead && !gamePaused) { 
+                    blocker.style.display = 'flex'; 
+                    gameStarted = false; 
+                    isShooting = false;
+                    document.getElementById('start-text').innerText = "클릭하여 재개";
+                    document.getElementById('start-text').style.color = "#ffff00";
+                }
             });
 
             document.addEventListener('pointerlockerror', () => {
@@ -521,24 +544,72 @@
             updateExpBar();
         }
 
+        function startWithLevel(targetLevel, event) {
+            if(event) event.stopPropagation();
+            
+            level = targetLevel;
+            exp = 0;
+            maxExp = 100;
+            for(let i=1; i<level; i++) {
+                maxExp = Math.floor(maxExp * 1.5);
+            }
+            
+            document.getElementById('level-text').innerText = "LV. " + level;
+            
+            // 테스트 편의성을 위해 무기 해금
+            if(level >= 5) {
+                if(!unlockedWeapons.includes(1)) unlockedWeapons.push(1);
+                if(!unlockedWeapons.includes(2)) unlockedWeapons.push(2);
+                if(!unlockedWeapons.includes(3)) unlockedWeapons.push(3);
+            }
+            if(level >= 10) {
+                if(!unlockedWeapons.includes(4)) unlockedWeapons.push(4);
+            }
+            
+            updateWeaponUI();
+            restartGameLogic();
+            startGame();
+        }
+
         function startGame() {
             if(!audioCtx) { audioCtx = new AudioContext(); loadSounds(); }
             if (isTouchDevice) {
                 document.getElementById('blocker').style.display = 'none';
                 gameStarted = true; setupTouchControls();
-            } else { controls.lock(); }
+            } else { 
+                try {
+                    // Promise를 반환하는 네이티브 lock을 통해 catch를 명시적으로 걸어줘서 Unhandled Rejection 방지
+                    const promise = document.body.requestPointerLock();
+                    if (promise !== undefined) {
+                        promise.catch(error => {
+                            // 에러 발생시 pointerlockerror 이벤트가 별도로 호출되므로 조용히 무시
+                        });
+                    }
+                } catch(e) {
+                    console.warn(e);
+                }
+            }
         }
 
-        function restartGame() {
-            isDead = false; gamePaused = false; score = 0; level = 1; exp = 0; maxExp = 100; isShooting = false;
+        function returnToMenu() {
+            document.getElementById('game-over').style.display = 'none';
+            document.getElementById('blocker').style.display = 'flex';
+            document.getElementById('start-text').innerText = "클릭하여 기본 시작 (LV.1)";
+            document.getElementById('start-text').style.color = "#00ffea";
+            gameStarted = false;
+            isDead = false;
+            score = 0;
+            document.getElementById('score').innerText = score;
+        }
+
+        function restartGameLogic() {
+            isDead = false; gamePaused = false; isShooting = false;
             pStats = { hp: 100, maxHp: 100, dmgMult: 1.0, speedMult: 1.0, ammoMult: 1.0 };
             
             hasFireBuff = false; buffTimer = 0; fireCooldown = 0;
             
-            weapons = JSON.parse(JSON.stringify(baseWeapons)); 
-            unlockedWeapons = [0]; currentWeaponIdx = 0;
             isReloading = false; reloadTimer = 0;
-            currentAmmo = getActiveWeapon().ammo;
+            currentAmmo = getMaxAmmo();
             
             bossSpawned = false; isBossFight = false; bossEntity = null;
             hasSpawnedLv5Boss = false; hasSpawnedLv10Boss = false;
@@ -549,12 +620,13 @@
             document.getElementById('boss-ui').style.display = 'none';
 
             if (isTouchDevice) {
-                document.getElementById('mobile-ui').style.display = 'block'; // 모바일 UI 복구
+                document.getElementById('mobile-ui').style.display = 'block'; 
             }
 
+            document.getElementById('start-text').innerText = "클릭하여 기본 시작 (LV.1)";
+            document.getElementById('start-text').style.color = "#00ffea";
+
             updateWeaponUI(); updateHpBar(); updateExpBar();
-            document.getElementById('score').innerText = score;
-            document.getElementById('level-text').innerText = "LV. " + level;
             document.getElementById('buff-status').innerText = "";
             document.getElementById('game-over').style.display = 'none';
             
@@ -569,9 +641,12 @@
             controls.getObject().position.set(0, 10, 0);
             
             spawnShapes(5);
-            for(let i=0; i<8; i++) spawnEnemy();
-            
-            startGame();
+            // 보스 레벨이면 일반 몹 스폰을 생략하거나 보스를 즉시 부르기 위해 플래그 설정
+            if(level === 5 || level === 10) {
+                // animate 루프에서 스폰되게 냅둠
+            } else {
+                for(let i=0; i<8; i++) spawnEnemy();
+            }
         }
 
         function updateBossHp() {
@@ -642,7 +717,19 @@
         }
 
         function onKeyDown(e) {
-            if (isDead || gamePaused) return;
+            if (isDead) return;
+            
+            // 문제 풀이나 레벨업 등으로 게임이 일시정지 된 상태여도 숫자키로 답은 고를 수 있게 허용
+            if (gamePaused) {
+                switch (e.code) {
+                    case 'Digit1': case 'Numpad1': checkAnswer(0); break;
+                    case 'Digit2': case 'Numpad2': checkAnswer(1); break;
+                    case 'Digit3': case 'Numpad3': checkAnswer(2); break;
+                    case 'Digit4': case 'Numpad4': checkAnswer(3); break;
+                }
+                return;
+            }
+
             switch (e.code) {
                 case 'ArrowUp': case 'KeyW': moveForward = true; break;
                 case 'ArrowLeft': case 'KeyA': moveLeft = true; break;
@@ -762,33 +849,59 @@
             ctx.fillStyle = colorStr; ctx.fillRect(0, 0, 512, 512);
             ctx.strokeStyle = '#fff'; ctx.lineWidth = 12; ctx.fillStyle = '#fff';
             ctx.font = 'bold 70px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.shadowColor = '#000'; ctx.shadowBlur = 8;
+            
             ctx.beginPath();
             if (type === 'triangle') {
                 ctx.moveTo(40, 472); ctx.lineTo(472, 472); ctx.lineTo(256, 40); ctx.closePath();
                 ctx.fillText(`밑:${dims.base}`, 256, 490); ctx.fillText(`높:${dims.height}`, 256, 256);
-            } else {
+            } else if (type === 'rectangle') {
                 ctx.rect(40, 100, 432, 312);
                 ctx.fillText(`가로:${dims.width}`, 256, 60); ctx.fillText(`세로:${dims.height}`, 490, 256);
+            } else if (type === 'parallelogram') {
+                ctx.moveTo(100, 412); ctx.lineTo(472, 412); ctx.lineTo(412, 100); ctx.lineTo(40, 100); ctx.closePath();
+                ctx.fillText(`밑:${dims.base}`, 286, 450); ctx.fillText(`높:${dims.height}`, 256, 256);
+            } else if (type === 'trapezoid') {
+                ctx.moveTo(40, 412); ctx.lineTo(472, 412); ctx.lineTo(356, 100); ctx.lineTo(156, 100); ctx.closePath();
+                ctx.fillText(`윗:${dims.top}`, 256, 60); ctx.fillText(`밑:${dims.bottom}`, 256, 450); ctx.fillText(`높:${dims.height}`, 256, 256);
             }
             ctx.stroke();
             const tex = new THREE.CanvasTexture(canvas); tex.encoding = THREE.sRGBEncoding; return tex;
         }
 
         function spawnShapes(count) {
-            const types = ['triangle', 'rectangle'];
+            const types = ['triangle', 'rectangle', 'parallelogram', 'trapezoid'];
             for(let i=0; i<count; i++) {
                 const type = types[Math.floor(Math.random() * types.length)];
                 let w = Math.floor(Math.random() * 10) + 5, h = Math.floor(Math.random() * 10) + 5;
-                if(type === 'triangle' && (w*h)%2 !== 0) w++; 
                 
-                let dims = type==='triangle'? {base:w, height:h} : {width:w, height:h};
-                let area = type==='triangle'? (w*h)/2 : w*h;
+                let dims, area, geo;
 
-                let geo;
                 if (type === 'triangle') {
+                    if((w*h)%2 !== 0) w++; 
+                    dims = {base:w, height:h}; area = (w*h)/2;
                     const shape = new THREE.Shape(); shape.moveTo(-w/2, -h/2); shape.lineTo(w/2, -h/2); shape.lineTo(0, h/2); shape.closePath();
                     geo = new THREE.ShapeGeometry(shape);
-                } else geo = new THREE.PlaneGeometry(w, h);
+                } else if (type === 'rectangle') {
+                    dims = {width:w, height:h}; area = w*h;
+                    geo = new THREE.PlaneGeometry(w, h);
+                } else if (type === 'parallelogram') {
+                    dims = {base:w, height:h}; area = w*h;
+                    const shape = new THREE.Shape();
+                    const offset = w * 0.2;
+                    shape.moveTo(-w/2 - offset, -h/2); shape.lineTo(w/2 - offset, -h/2);
+                    shape.lineTo(w/2 + offset, h/2); shape.lineTo(-w/2 + offset, h/2); shape.closePath();
+                    geo = new THREE.ShapeGeometry(shape);
+                } else if (type === 'trapezoid') {
+                    let top = Math.floor(Math.random() * 5) + 3;
+                    let bottom = Math.floor(Math.random() * 8) + top + 2; 
+                    if (((top + bottom) * h) % 2 !== 0) top++;
+                    dims = {top: top, bottom: bottom, height: h};
+                    area = (top + bottom) * h / 2;
+                    const shape = new THREE.Shape();
+                    shape.moveTo(-bottom/2, -h/2); shape.lineTo(bottom/2, -h/2);
+                    shape.lineTo(top/2, h/2); shape.lineTo(-top/2, h/2); shape.closePath();
+                    geo = new THREE.ShapeGeometry(shape);
+                }
 
                 const colorVal = Math.random() * 0xffffff;
                 const tex = createPolygonTexture(type, dims, '#' + new THREE.Color(colorVal).getHexString()); 
@@ -819,6 +932,23 @@
             return ans.sort(()=>Math.random()-0.5);
         }
 
+        function getValidSpawnPosition() {
+            let px = 0, pz = 0;
+            let pPos = controls.getObject().position;
+            for(let i=0; i<15; i++) {
+                px = (Math.random() - 0.5) * 440; 
+                pz = (Math.random() - 0.5) * 440;
+                // 플레이어와 너무 가깝지 않게
+                if (Math.hypot(px - pPos.x, pz - pPos.z) < 80) continue; 
+                // 장애물(벽)과 겹치는지 체크
+                let dummyBox = new THREE.Box3().setFromCenterAndSize(new THREE.Vector3(px, 10, pz), new THREE.Vector3(12, 20, 12));
+                if (!obstacleBoxes.some(box => dummyBox.intersectsBox(box))) {
+                    return {x: px, z: pz};
+                }
+            }
+            return {x: px, z: pz}; 
+        }
+
         function spawnEnemy() {
             if (isBossFight) return; 
 
@@ -826,9 +956,9 @@
             if (level >= 11) {
                 const r = Math.random();
                 if(r < 0.2) type = 'turret';
-                else if(r < 0.5) type = 'ranged';
-            } else if (level >= 6) {
-                if(Math.random() < 0.3) type = 'ranged';
+                else if(r < 0.6) type = 'ranged';
+            } else if (level >= 5) {
+                if(Math.random() < 0.8) type = 'ranged'; // 5~10레벨은 80% 확률로 원거리 좀비
             }
 
             if (type === 'turret') spawnTurret();
@@ -861,12 +991,9 @@
 
         function spawnMeleeZombie() {
             const { group, parts } = buildZombieModel(0x3cb371, 0x334455);
-            const angle = Math.random() * Math.PI * 2;
-            const dist = 80 + Math.random() * 100;
-            const px = controls.getObject().position.x + Math.cos(angle)*dist;
-            const pz = controls.getObject().position.z + Math.sin(angle)*dist;
+            const pos = getValidSpawnPosition();
             
-            group.position.set(px, 6, pz); 
+            group.position.set(pos.x, 6, pos.z); 
             group.userData = { 
                 type: 'melee', hp: 30 + (level*10), speed: Math.random()*15 + 10 + (level*2),
                 armL: parts.armL, armR: parts.armR, legL: parts.legL, legR: parts.legR,
@@ -877,11 +1004,11 @@
 
         function spawnRangedZombie() {
             const { group, parts } = buildZombieModel(0xaaaaaa, 0x222222);
-            let px, pz, py = 100; 
-            if(Math.random() > 0.5) { px = (Math.random() > 0.5 ? 260 : -260); pz = (Math.random()-0.5) * 400; }
-            else { pz = (Math.random() > 0.5 ? 260 : -260); px = (Math.random()-0.5) * 400; }
+            const pos = getValidSpawnPosition();
 
-            group.position.set(px, py, pz); 
+            let py = 100; // 위에서 떨어지게
+
+            group.position.set(pos.x, py, pos.z); 
             group.userData = { 
                 type: 'ranged', hp: 20 + (level*5), speed: 0,
                 armL: parts.armL, armR: parts.armR, legL: parts.legL, legR: parts.legR,
@@ -902,8 +1029,8 @@
 
             group.traverse(c => { if(c.isMesh) { c.castShadow = true; c.receiveShadow = true; }});
 
-            const angle = Math.random() * Math.PI * 2;
-            group.position.set(controls.getObject().position.x + Math.cos(angle)*100, 0, controls.getObject().position.z + Math.sin(angle)*100);
+            const pos = getValidSpawnPosition();
+            group.position.set(pos.x, 0, pos.z);
             
             group.userData = { type: 'turret', hp: 100 + (level*15), attackCooldown: 1.5, flashTime: 0, head: head };
             scene.add(group); enemies.push(group);
@@ -919,8 +1046,8 @@
 
             const { group, parts } = buildZombieModel(0x8b0000, 0x111111);
             const scale = 4; group.scale.set(scale, scale, scale);
-            const angle = Math.random() * Math.PI * 2;
-            group.position.set(Math.cos(angle)*150, 6*scale, Math.sin(angle)*150); 
+            const pos = getValidSpawnPosition();
+            group.position.set(pos.x, 6*scale, pos.z); 
             
             let bossMaxHp = 2000 + (level * 100);
             group.userData = { 
@@ -946,8 +1073,8 @@
             const eyeR = new THREE.Mesh(eyeGeo, eyeMat); eyeR.position.set(-1, 7, 2.1); parts.head.add(eyeR);
 
             const scale = 1.5; group.scale.set(scale, scale, scale);
-            const angle = Math.random() * Math.PI * 2;
-            group.position.set(Math.cos(angle)*150, 6*scale, Math.sin(angle)*150); 
+            const pos = getValidSpawnPosition();
+            group.position.set(pos.x, 6*scale, pos.z); 
             
             let bossMaxHp = 4000 + (level * 150);
             group.userData = { 
@@ -982,9 +1109,12 @@
                 const geo = new THREE.CylinderGeometry(3, 3, 0.2, 4); 
                 const mat = new THREE.MeshStandardMaterial({color: 0xdddddd, metalness: 1.0});
                 const shuriken = new THREE.Mesh(geo, mat);
-                shuriken.position.copy(startPos); shuriken.position.y += 10;
                 
-                const dir = new THREE.Vector3().subVectors(targetPos, startPos).normalize();
+                // 표창 시작 높이를 낮춤
+                shuriken.position.copy(startPos); shuriken.position.y += 5; 
+                
+                // 허공으로 날아가지 않도록 보정 (실제 표창의 위치에서 플레이어 위치로 조준)
+                const dir = new THREE.Vector3().subVectors(targetPos, shuriken.position).normalize(); 
                 shuriken.velocity = dir.multiplyScalar(300); 
                 shuriken.userData = { type: type, life: 3.0, damage: 30 };
                 scene.add(shuriken); enemyProjectiles.push(shuriken);
@@ -1037,9 +1167,9 @@
         }
 
         function showLevelUpPanel() {
-            gamePaused = true;
+            gamePaused = true; // 게임 일시정지
             isShooting = false;
-            if(!isTouchDevice) controls.unlock();
+            if(!isTouchDevice) controls.unlock(); // 마우스 해제 (블로커 안 띄우도록 설정됨)
             if(window.playSound) window.playSound('levelup');
 
             document.getElementById('level-text').innerText = "LV. " + level;
@@ -1071,9 +1201,11 @@
                     upg.action();
                     panel.style.display = 'none';
                     gamePaused = false;
+                    // 블로커 띄우지 않고 바로 게임 재진입
                     if(!isTouchDevice) {
-                        document.getElementById('blocker').style.display = 'flex';
-                        gameStarted = false;
+                        startGame();
+                    } else {
+                        gameStarted = true;
                     }
                 };
                 choicesDiv.appendChild(card);
@@ -1085,7 +1217,14 @@
             currentTarget = shape;
             const data = shape.userData;
             const panel = document.getElementById('question-panel');
-            document.getElementById('question-text').innerText = data.type === 'triangle' ? `삼각형 넓이? (밑:${data.dimensions.base}, 높:${data.dimensions.height})` : `사각형 넓이? (가로:${data.dimensions.width}, 세로:${data.dimensions.height})`;
+            
+            let qText = "";
+            if (data.type === 'triangle') qText = `삼각형 넓이? (밑:${data.dimensions.base}, 높:${data.dimensions.height})`;
+            else if (data.type === 'rectangle') qText = `사각형 넓이? (가로:${data.dimensions.width}, 세로:${data.dimensions.height})`;
+            else if (data.type === 'parallelogram') qText = `평행사변형 넓이? (밑:${data.dimensions.base}, 높:${data.dimensions.height})`;
+            else if (data.type === 'trapezoid') qText = `사다리꼴 넓이? (윗변:${data.dimensions.top}, 밑변:${data.dimensions.bottom}, 높:${data.dimensions.height})`;
+            document.getElementById('question-text').innerText = qText;
+            
             const btns = document.getElementById('answer-buttons');
             btns.innerHTML = '';
             
@@ -1094,7 +1233,6 @@
                 b.className = 'answer-btn'; 
                 b.innerText = `${i+1}. ${ans}`;
                 
-                // 터치 기기와 PC 모두 안정적으로 동작하도록 pointerdown 사용
                 b.addEventListener('pointerdown', (e) => {
                     e.preventDefault(); e.stopPropagation();
                     checkAnswer(i);
@@ -1103,12 +1241,19 @@
             });
             panel.style.display = 'block';
             isShooting = false;
+            
+            gamePaused = true;
+            if(!isTouchDevice) controls.unlock(); // PC 유저도 문제 버튼 클릭 가능하게 마우스 해제
         }
 
-        function hideQuestionPanel() { document.getElementById('question-panel').style.display = 'none'; currentTarget = null; }
+        function hideQuestionPanel() { 
+            document.getElementById('question-panel').style.display = 'none'; 
+            currentTarget = null; 
+            gamePaused = false;
+        }
 
         function checkAnswer(index) {
-            if(!currentTarget || isDead || gamePaused) return;
+            if(!currentTarget || isDead) return;
             const data = currentTarget.userData;
             const btns = document.querySelectorAll('.answer-btn');
             if(!btns[index]) return;
@@ -1116,14 +1261,23 @@
             if(data.answers[index] === data.correctAnswer) {
                 btns[index].classList.add('correct'); 
                 score += 200; document.getElementById('score').innerText = score;
-                addExp(50); 
-
+                
                 if(window.playSound) window.playSound('hit');
                 createExplosion(currentTarget.position, 0x00ffaa, 40);
                 spawnItem(currentTarget.position.clone());
 
                 scene.remove(currentTarget); shapes = shapes.filter(s => s !== currentTarget);
-                setTimeout(() => { hideQuestionPanel(); spawnShapes(1); }, 500);
+                
+                setTimeout(() => { 
+                    hideQuestionPanel(); 
+                    addExp(50); // 레벨업 시 gamePaused가 다시 true로 됨
+                    
+                    if (!gamePaused && !isDead) { // 레벨업 패널이 열리지 않았을 때만 마우스 재잠금 시도
+                        if(!isTouchDevice) startGame();
+                        else gameStarted = true;
+                    }
+                    spawnShapes(1); 
+                }, 500);
             } else {
                 btns[index].classList.add('wrong'); 
                 score = Math.max(0, score-50); document.getElementById('score').innerText = score;
@@ -1164,7 +1318,7 @@
                 
                 if(!isTouchDevice) controls.unlock();
                 
-                document.getElementById('mobile-ui').style.display = 'none'; // 모바일 UI 완전 숨김
+                document.getElementById('mobile-ui').style.display = 'none'; 
                 
                 document.getElementById('final-score').innerText = score;
                 document.getElementById('final-level').innerText = level;
@@ -1219,31 +1373,47 @@
                 }
                 rc.ray.direction.copy(dir);
 
-                const bullet = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 10, 4).rotateX(Math.PI/2), new THREE.MeshBasicMaterial({ color: 0xffff00, transparent: true, opacity: 0.9 }));
-                bullet.position.copy(new THREE.Vector3(0, 0.3, -4.5).applyMatrix4(gunGroup.matrixWorld));
-                bullet.lookAt(bullet.position.clone().add(dir));
-                bullet.velocity = dir.clone().multiplyScalar(1500); bullet.life = 1.0;
-                scene.add(bullet); bullets.push(bullet);
+                let maxDist = Infinity;
+                let hitPoint = null;
+                let hitType = null;
+                let hitEntity = null;
+                let hitMesh = null;
 
+                // 벽 충돌 검사 (관통 방지)
+                const wallHits = rc.intersectObjects(objects, false);
+                if (wallHits.length > 0) { maxDist = wallHits[0].distance; hitPoint = wallHits[0].point; hitType = 'wall'; }
+
+                // 도형(문제) 타격 검사
                 const shapeHits = rc.intersectObjects(shapes, false);
-                if(shapeHits.length > 0) {
-                    showHitMarker();
-                    if(window.playSound) window.playSound('hit');
-                    createExplosion(shapeHits[0].point, 0xffffff, 15);
-                    showQuestionPanel(shapeHits[0].object);
-                    return; 
+                if (shapeHits.length > 0 && shapeHits[0].distance < maxDist) {
+                    maxDist = shapeHits[0].distance; hitPoint = shapeHits[0].point; hitType = 'shape'; hitEntity = shapeHits[0].object;
                 }
 
-                let hitEnemy = null; let closestDist = Infinity; let hitPoint = null; let hitMesh = null; 
+                // 좀비 타격 검사
                 enemies.forEach(z => {
                     const zHits = rc.intersectObject(z, true);
-                    if(zHits.length > 0 && zHits[0].distance < closestDist) {
-                        closestDist = zHits[0].distance; hitEnemy = z;
-                        hitPoint = zHits[0].point; hitMesh = zHits[0].object;
+                    if (zHits.length > 0 && zHits[0].distance < maxDist) {
+                        maxDist = zHits[0].distance; hitPoint = zHits[0].point; hitType = 'enemy'; hitEntity = z; hitMesh = zHits[0].object;
                     }
                 });
 
-                if(hitEnemy) {
+                const bullet = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 10, 4).rotateX(Math.PI/2), new THREE.MeshBasicMaterial({ color: 0xffff00, transparent: true, opacity: 0.9 }));
+                bullet.position.copy(new THREE.Vector3(0, 0.3, -4.5).applyMatrix4(gunGroup.matrixWorld));
+                bullet.lookAt(bullet.position.clone().add(dir));
+                bullet.velocity = dir.clone().multiplyScalar(1500); 
+                bullet.life = maxDist !== Infinity ? maxDist / 1500 : 1.0;
+                scene.add(bullet); bullets.push(bullet);
+
+                if(hitType === 'wall') {
+                    createExplosion(hitPoint, 0xaaaaaa, 5); // 벽 타격 이펙트
+                } else if(hitType === 'shape') {
+                    showHitMarker();
+                    if(window.playSound) window.playSound('hit');
+                    createExplosion(hitPoint, 0xffffff, 15);
+                    showQuestionPanel(hitEntity);
+                    return; 
+                } else if(hitType === 'enemy') {
+                    let hitEnemy = hitEntity;
                     showHitMarker();
                     let isHeadshot = hitMesh && hitMesh.name === 'head';
                     let baseDmg = weapon.damage * pStats.dmgMult;
@@ -1391,8 +1561,9 @@
                     onShoot(); 
                 }
 
-                if(level >= 5 && !hasSpawnedLv5Boss) { hasSpawnedLv5Boss = true; spawnBoss5(); }
-                if(level >= 10 && !hasSpawnedLv10Boss) { hasSpawnedLv10Boss = true; spawnBoss10(); }
+                // 레벨 진입 시 보스 소환
+                if(level === 5 && !hasSpawnedLv5Boss) { hasSpawnedLv5Boss = true; spawnBoss5(); }
+                if(level === 10 && !hasSpawnedLv10Boss) { hasSpawnedLv10Boss = true; spawnBoss10(); }
 
                 if(fireCooldown > 0) fireCooldown -= delta;
                 if(hasFireBuff) {
@@ -1414,7 +1585,7 @@
 
                 const prevPos = controls.getObject().position.clone();
                 
-                // 플레이어 X축 이동 및 충돌 체크 (슬라이딩 개선)
+                // 플레이어 X축 이동 및 충돌 체크 (벽에 끼지 않고 슬라이딩)
                 controls.moveRight(-velocity.x * delta);
                 let pPos = controls.getObject().position;
                 let feetY = pPos.y - 10;
@@ -1424,7 +1595,7 @@
                     velocity.x = 0;
                 }
 
-                // 플레이어 Z축 이동 및 충돌 체크 (슬라이딩 개선)
+                // 플레이어 Z축 이동 및 충돌 체크 (벽에 끼지 않고 슬라이딩)
                 controls.moveForward(-velocity.z * delta);
                 pPos = controls.getObject().position;
                 playerBox.setFromCenterAndSize(new THREE.Vector3(pPos.x, feetY + 9.5, pPos.z), new THREE.Vector3(4, 17, 4));
@@ -1499,17 +1670,53 @@
                             }
                         } 
                         else if (z.userData.type === 'boss10') {
-                            const moveX = (dx / dist) * z.userData.speed * delta; const moveZ = (dz / dist) * z.userData.speed * delta;
-                            z.position.x += moveX; z.position.z += moveZ;
+                            // 10레벨 보스: 거리 유지 로직
+                            let targetX = z.position.x;
+                            let targetZ = z.position.z;
                             
+                            if (dist > 120) { // 너무 멀면 다가감
+                                targetX += (dx / dist) * z.userData.speed * delta;
+                                targetZ += (dz / dist) * z.userData.speed * delta;
+                            } else if (dist < 80) { // 너무 가까우면 뒤로 물러남
+                                targetX -= (dx / dist) * z.userData.speed * delta;
+                                targetZ -= (dz / dist) * z.userData.speed * delta;
+                            }
+                            
+                            let cSize = z.userData.zSize || new THREE.Vector3(4,12,4);
+                            let cHeight = z.userData.zHeight || 6;
+                            
+                            // 보스10 X축 충돌 검사
+                            let zBoxForObstacles = new THREE.Box3().setFromCenterAndSize(
+                                new THREE.Vector3(targetX, z.position.y + cHeight, z.position.z), cSize
+                            );
+                            if (!obstacleBoxes.some(box => zBoxForObstacles.intersectsBox(box))) {
+                                z.position.x = targetX;
+                            }
+                            
+                            // 보스10 Z축 충돌 검사
+                            zBoxForObstacles.setFromCenterAndSize(
+                                new THREE.Vector3(z.position.x, z.position.y + cHeight, targetZ), cSize
+                            );
+                            if (!obstacleBoxes.some(box => zBoxForObstacles.intersectsBox(box))) {
+                                z.position.z = targetZ;
+                            }
+
+                            z.userData.velocityY -= 9.8 * 80.0 * delta; 
+                            z.position.y += z.userData.velocityY * delta;
+                            
+                            let groundLevel = 9; // Boss 10의 높이에 맞춘 바닥 
+                            if (z.position.y < groundLevel) { z.position.y = groundLevel; z.userData.velocityY = 0; }
+
+                            // 텔레포트
                             z.userData.teleportCooldown -= delta;
                             if (z.userData.teleportCooldown <= 0) {
                                 z.userData.teleportCooldown = 4.0;
                                 if(window.playSound) window.playSound('teleport');
                                 const tDir = new THREE.Vector3(); camera.getWorldDirection(tDir);
-                                z.position.set(pPos.x - tDir.x*30 + (Math.random()-0.5)*20, 10, pPos.z - tDir.z*30 + (Math.random()-0.5)*20);
+                                z.position.set(pPos.x - tDir.x*80 + (Math.random()-0.5)*40, 10, pPos.z - tDir.z*80 + (Math.random()-0.5)*40);
                             }
                             
+                            // 수리검 공격
                             z.userData.attackCooldown -= delta;
                             if (z.userData.attackCooldown <= 0) {
                                 z.userData.attackCooldown = 1.5;
@@ -1543,7 +1750,8 @@
                             z.userData.velocityY -= 9.8 * 80.0 * delta; 
                             z.position.y += z.userData.velocityY * delta;
 
-                            const groundLevel = z.userData.isBoss ? 24 : 6;
+                            let groundLevel = 6;
+                            if (z.userData.type === 'boss5') groundLevel = 24;
                             if (z.position.y < groundLevel) { z.position.y = groundLevel; z.userData.velocityY = 0; }
 
                             if (z.userData.type === 'boss5') {
@@ -1588,7 +1796,9 @@
                             createExplosion(p.position, 0x555555, isBig ? 30 : 15);
                             if(window.playSound) window.playSound('explode');
                             
-                            if(pPos.distanceTo(p.position) < (isBig ? 25 : 10)) {
+                            // 바닥에 떨어졌을 때 폭발 범위 피격 판정
+                            const distXZ = Math.hypot(p.position.x - pPos.x, p.position.z - pPos.z);
+                            if(distXZ < (isBig ? 25 : 12)) {
                                 damagePlayer(isBig ? 50 : 20); 
                                 cameraShake = isBig ? 2.0 : 0.5;
                             }
@@ -1599,8 +1809,12 @@
                         if(p.userData.type === 'shuriken') p.rotation.y += delta * 30; 
                         p.life -= delta;
 
-                        const pBox = new THREE.Box3().setFromCenterAndSize(new THREE.Vector3(pPos.x, pPos.y - 1.5, pPos.z), new THREE.Vector3(4, 17, 4));
-                        if(pBox.containsPoint(p.position)) {
+                        // 투사체가 빠를 경우를 대비하여 원기둥 형태로 넉넉한 피격 판정(Hitbox) 부여
+                        const dx = p.position.x - pPos.x;
+                        const dz = p.position.z - pPos.z;
+                        const distXZ = Math.hypot(dx, dz);
+
+                        if(distXZ < 6.0 && p.position.y >= 0 && p.position.y <= 16) {
                             damagePlayer(p.userData.damage); cameraShake = 0.5;
                             createExplosion(p.position, 0xff0000, 10);
                             scene.remove(p); enemyProjectiles.splice(i, 1);
